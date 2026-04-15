@@ -1,0 +1,230 @@
+from flask import Flask, render_template, request, jsonify, redirect, url_for
+from collections import Counter
+import os
+
+app = Flask(__name__)
+
+# Combination rules: list of (requirements_dict, result_sku)
+# requirements_dict maps sku -> required_quantity
+COMBINATIONS = [
+    ({'X002C185V9': 2,}, "KS0343"),
+    ({'X002C185V9': 3,}, "KS0344"),
+    ({'X002C185V9': 1,'X002C18AOV': 1}, "KS0345"),
+    ({'X002C185V9': 2,'X002C18AOV': 1}, "KS0346"),
+    ({'X002C18BVD': 2,}, "KS0348"),
+    ({'X002C18BVD': 3,}, "KS0349"),
+    ({'X002C18BVD': 1,'X002C18CFD': 1}, "KS0350"),
+    ({'X002C18BVD': 2,'X002C18CFD': 1}, "KS0351"),
+    ({'X002CSCBNP': 2,}, "KS0353"),
+    ({'X002CSCBNP': 3,}, "KS0354"),
+    ({'X002CSCBNP': 1,'X002GYF8BH': 1}, "KS0355"),
+    ({'X002CSCBNP': 2,'X002GYF8BH': 1}, "KS0356"),
+    ({'X002C185V9': 1,'X002C16R7D': 1}, "KS0358"),
+    ({'X002C185V9': 1,'X002C16R7D': 2}, "KS0359"),
+    ({'X002C16R7D': 1,'X002C18AOV': 1}, "KS0360"),
+    ({'X002C16R7D': 2,'X002C18AOV': 1}, "KS0361"),
+    ({'X002C18BVD': 1,'X002C18ANR': 1}, "KS0363"),
+    ({'X002C18BVD': 1,'X002C18ANR': 2}, "KS0364"),
+    ({'X002C18ANR': 1,'X002C18CFD': 1}, "KS0365"),
+    ({'X002C18ANR': 2,'X002C18CFD': 1}, "KS0366"),
+    ({'X002CSCBNP': 1,'X002CSCOMN': 1}, "KS0368"),
+    ({'X002CSCBNP': 1,'X002CSCOMN': 2}, "KS0369"),
+    ({'X002CSCOMN': 1,'X002GYF8BH': 1}, "KS0370"),
+    ({'X002CSCOMN': 2,'X002GYF8BH': 1}, "KS0371"),
+    ({'X002C185V9': 1,'X002GY8GNT': 1}, "KS0373"),
+    ({'X002C185V9': 1,'X002GY8GNT': 2}, "KS0374"),
+    ({'X002GY8GNT': 1,'X002C18AOV': 1}, "KS0375"),
+    ({'X002GY8GNT': 2,'X002C18AOV': 1}, "KS0376"),
+    ({'X002C18BVD': 1,'X002GYE7TV': 1}, "KS0378"),
+    ({'X002C18BVD': 1,'X002GYE7TV': 2}, "KS0379"),
+    ({'X002GYE7TV': 1,'X002C18CFD': 1}, "KS0380"),
+    ({'X002GYE7TV': 2,'X002C18CFD': 1}, "KS0381"),
+    ({'X002CSCBNP': 1,'X002GYDIAZ': 1}, "KS0383"),
+    ({'X002CSCBNP': 1,'X002GYDIAZ': 2}, "KS0384"),
+    ({'X002GYDIAZ': 1,'X002GYF8BH': 1}, "KS0385"),
+    ({'X002GYDIAZ': 2,'X002GYF8BH': 1}, "KS0386"),
+    ({'X002GYE809': 2,}, "KS0391"),
+    ({'X002GYE809': 3,}, "KS0392"),
+    ({'X002GYE809': 1,'X002GY5F5B': 1}, "KS0393"),
+    ({'X002GYE809': 2,'X002GY5F5B': 1}, "KS0394"),
+    ({'X002GYDSXH': 2,}, "KS0396"),
+    ({'X002GYDSXH': 3,}, "KS0397"),
+    ({'X002GYDSXH': 1,'X002GY8HKB': 1}, "KS0398"),
+    ({'X002GYDSXH': 2,'X002GY8HKB': 1}, "KS0399"),
+    ({'X002GYC8MJ': 2,}, "KS0401"),
+    ({'X002GYC8MJ': 3,}, "KS0402"),
+    ({'X002GYC8MJ': 1,'X002GYCBC1': 1}, "KS0403"),
+    ({'X002GYC8MJ': 2,'X002GYCBC1': 1}, "KS0404"),
+    ({'X002GYE809': 1,'X002GY8H29': 1}, "KS0406"),
+    ({'X002GYE809': 1,'X002GY8H29': 2}, "KS0407"),
+    ({'X002GY8H29': 1,'X002GY5F5B': 1}, "KS0408"),
+    ({'X002GY8H29': 2,'X002GY5F5B': 1}, "KS0409"),
+    ({'X002GYDSXH': 1,'X002HB4OBJ': 1}, "KS0411"),
+    ({'X002GYDSXH': 1,'X002HB4OBJ': 2}, "KS0412"),
+    ({'X002HB4OBJ': 1,'X002GY8HKB': 1}, "KS0413"),
+    ({'X002HB4OBJ': 2,'X002GY8HKB': 1}, "KS0414"),
+    ({'X002GYC8MJ': 1,'X002GYDW0L': 1}, "KS0415"),
+    ({'X002GYC8MJ': 1,'X002GYDW0L': 2}, "KS0416"),
+    ({'X002GYDW0L': 1,'X002GYCBC1': 1}, "KS0418"),
+    ({'X002GYDW0L': 2,'X002GYCBC1': 1}, "KS0419"),
+    ({'X002GYE809': 1,'X002GYF4FR': 1}, "KS0421"),
+    ({'X002GYE809': 1,'X002GYF4FR': 2}, "KS0422"),
+    ({'X002GYF4FR': 1,'X002GY5F5B': 1}, "KS0423"),
+    ({'X002GYF4FR': 2,'X002GY5F5B': 1}, "KS0424"),
+    ({'X002GYDSXH': 1,'X002GY8HF1': 1}, "KS0426"),
+    ({'X002GYDSXH': 1,'X002GY8HF1': 2}, "KS0427"),
+    ({'X002GY8HF1': 1,'X002GY8HKB': 1}, "KS0428"),
+    ({'X002GY8HF1': 2,'X002GY8HKB': 1}, "KS0429"),
+    ({'X002GYC8MJ': 1,'X002GYCB4J': 1}, "KS0431"),
+    ({'X002GYC8MJ': 1,'X002GYCB4J': 2}, "KS0432"),
+    ({'X002GYCB4J': 1,'X002GYCBC1': 1}, "KS0433"),
+    ({'X002GYCB4J': 2,'X002GYCBC1': 1}, "KS0434"),
+    ({'X0028YV7NX': 2,}, "KS0050"),
+    ({'X0028YV7NX': 3,}, "KS0051"),
+    ({'X0028YV7P1': 2,}, "KS0053"),
+    ({'X0028YV7P1': 3,}, "KS0054"),
+    ({'X0028YV7P1': 1,'X0028YP6GH': 1}, "KS0089"),
+    ({'X0028YV7P1': 1,'X0028YP6GH': 2}, "KS0090"),
+    ({'X002GYC9E1': 1,'X0028YP6GH': 1}, "KS0091"),
+    ({'X002GYC9E1': 1,'X0028YP6GH': 2}, "KS0092"),
+    ({'X0028YV7NX': 1,'X0028YRWBT': 1}, "KS0093"),
+    ({'X0028YV7NX': 1,'X0028YRWBT': 2}, "KS0094"),
+    ({'X002GYDKXP': 1,'X0028YRWBT': 1}, "KS0095"),
+    ({'X002GYDKXP': 1,'X0028YRWBT': 2}, "KS0096"),
+    ({'X002GYC9E1': 1,'X0028YV7P1': 1}, "KS0097"),
+    ({'X002GYC9E1': 1,'X0028YV7P1': 2}, "KS0098"),
+    ({'X002GYDKXP': 1,'X0028YV7NX': 1}, "KS0099"),
+    ({'X002GYDKXP': 1,'X0028YV7NX': 2}, "KS0100"),
+    ({'X0028YV7NX': 1,'X002J2XJTT': 1}, "KS0105"),
+    ({'X0028YV7NX': 1,'X002J2XJTT': 2}, "KS0106"),
+    ({'X002GYDKXP': 1,'X002J2XJTT': 1}, "KS0107"),
+    ({'X002GYDKXP': 1,'X002J2XJTT': 2}, "KS0108"),
+    ({'X0028YV7P1': 1,'X002GYF80N': 1}, "KS0110"),
+    ({'X0028YV7P1': 1,'X002GYF80N': 2}, "KS0111"),
+    ({'X002GYC9E1': 1,'X002GYF80N': 1}, "KS0112"),
+    ({'X002GYC9E1': 1,'X002GYF80N': 2}, "KS0113"),
+    ({'X002C185V9': 1,'X002IZM0ND': 1}, "KS0514"),
+    ({'X002C185V9': 2,'X002IZM0ND': 1}, "KS0515"),
+    ({'X002GY8GNT': 1,'X002IZM0ND': 1}, "KS0516"),
+    ({'X002GY8GNT': 2,'X002IZM0ND': 1}, "KS0517"),
+    ({'X002C16R7D': 1,'X002IZM0ND': 1}, "KS0518"),
+    ({'X002C16R7D': 2,'X002IZM0ND': 1}, "KS0519"),
+    ({'X002C18BVD': 1,'X002IZPNUF': 1}, "KS0521"),
+    ({'X002C18BVD': 2,'X002IZPNUF': 1}, "KS0522"),
+    ({'X002GYE7TV': 1,'X002IZPNUF': 1}, "KS0523"),
+    ({'X002GYE7TV': 2,'X002IZPNUF': 1}, "KS0524"),
+    ({'X002C18ANR': 1,'X002IZPNUF': 1}, "KS0525"),
+    ({'X002C18ANR': 2,'X002IZPNUF': 1}, "KS0526"),
+    ({'X002CSCBNP': 1,'X002IZCJ8J': 1}, "KS0528"),
+    ({'X002CSCBNP': 2,'X002IZCJ8J': 1}, "KS0529"),
+    ({'X002GYDIAZ': 1,'X002IZCJ8J': 1}, "KS0530"),
+    ({'X002GYDIAZ': 2,'X002IZCJ8J': 1}, "KS0531"),
+    ({'X002CSCOMN': 1,'X002IZCJ8J': 1}, "KS0532"),
+    ({'X002CSCOMN': 2,'X002IZCJ8J': 1}, "KS0533"),
+    ({'X002GYE809': 1,'X002IZCL91': 1}, "KS0535"),
+    ({'X002GYE809': 2,'X002IZCL91': 1}, "KS0536"),
+    ({'X002GYF4FR': 1,'X002IZCL91': 1}, "KS0537"),
+    ({'X002GYF4FR': 2,'X002IZCL91': 1}, "KS0538"),
+    ({'X002GY8H29': 1,'X002IZCL91': 1}, "KS0539"),
+    ({'X002GY8H29': 2,'X002IZCL91': 1}, "KS0540"),
+    ({'X002GYDSXH': 1,'X002J33GGJ': 1}, "KS0542"),
+    ({'X002GYDSXH': 2,'X002J33GGJ': 1}, "KS0543"),
+    ({'X002GY8HF1': 1,'X002J33GGJ': 1}, "KS0544"),
+    ({'X002GY8HF1': 2,'X002J33GGJ': 1}, "KS0545"),
+    ({'X002HB4OBJ': 1,'X002J33GGJ': 1}, "KS0546"),
+    ({'X002HB4OBJ': 2,'X002J33GGJ': 1}, "KS0547"),
+    ({'X002GYC8MJ': 1,'KS0548': 1}, "KS0549"),
+    ({'X002GYC8MJ': 2,'KS0548': 1}, "KS0550"),
+    ({'X002GYDW0L': 1,'KS0548': 1}, "KS0551"),
+    ({'X002GYDW0L': 2,'KS0548': 1}, "KS0552"),
+    ({'X002GYCB4J': 1,'KS0548': 1}, "KS0553"),
+    ({'X002GYCB4J': 2,'KS0548': 1}, "KS0554"),
+    ({'X0028YV7NX': 1,'X002J33G5Z': 1}, "KS0556"),
+    ({'X0028YV7NX': 2,'X002J33G5Z': 1}, "KS0557"),
+    ({'X002J2XJTT': 1,'X002J33G5Z': 1}, "KS0558"),
+    ({'X002J2XJTT': 2,'X002J33G5Z': 1}, "KS0559"),
+    ({'X0028YRWBT': 1,'X002J33G5Z': 1}, "KS0560"),
+    ({'X0028YRWBT': 2,'X002J33G5Z': 1}, "KS0561"),
+    ({'X0028YV7P1': 1,'X002J33VBT': 1}, "KS0563"),
+    ({'X0028YV7P1': 2,'X002J33VBT': 1}, "KS0564"),
+    ({'X002GYF80N': 1,'X002J33VBT': 1}, "KS0565"),
+    ({'X002GYF80N': 2,'X002J33VBT': 1}, "KS0566"),
+    ({'X0028YP6GH': 1,'X002J33VBT': 1}, "KS0567"),
+    ({'X0028YP6GH': 2,'X002J33VBT': 1}, "KS0568"),
+    ({'BR-1': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0342-FBA"),
+    ({'BR-2': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0347-FBA"),
+    ({'BR-2B-1': 1,'BR-3': 1,'BR-5B-1': 1}, "KS0352-FBA"),
+    ({'BR-2D-1': 1,'BR-4': 1,'BR-5D-1': 1}, "KS0357-FBA"),
+    ({'BR-2D-1': 1,'BR-5': 1,'BR-5D-1': 1}, "KS0362-FBA"),
+    ({'BR-2D-1': 1,'BR-5D-1': 1,'BR-6': 1}, "KS0367-FBA"),
+    ({'BR-2C-1': 1,'BR-5C-1': 1,'BR-7': 1}, "KS0372-FBA"),
+    ({'BR-2C-1': 1,'BR-5C-1': 1,'BR-8': 1}, "KS0377-FBA"),
+    ({'BR-2C-1': 1,'BR-5C-1': 1,'BR-9': 1}, "KS0382-FBA"),
+    ({'BR-10': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0387-FBA"),
+    ({'BR-11': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0388-FBA"),
+    ({'BR-12': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0389-FBA"),
+    ({'BR-13': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0390-FBA"),
+    ({'BR-14': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0395-FBA"),
+    ({'BR-15': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0400-FBA"),
+    ({'BR-16': 1,'BR-2D-1': 1,'BR-5D-1': 1}, "KS0405-FBA"),
+    ({'BR-17': 1,'BR-2D-1': 1,'BR-5D-1': 1}, "KS0410-FBA"),
+    ({'BR-18': 1,'BR-2D-1': 1,'BR-5D-1': 1}, "KS0415-FBA"),
+    ({'BR-19': 1,'BR-2C-1': 1,'BR-5C-1': 1}, "KS0420-FBA"),
+    ({'BR-20': 1,'BR-2C-1': 1,'BR-5C-1': 1}, "KS0425-FBA"),
+    ({'BR-21': 1,'BR-2C-1': 1,'BR-5C-1': 1}, "KS0430-FBA"),
+    ({'BR-22': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0435-FBA"),
+    ({'BR-23': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0436-FBA"),
+    ({'BR-24': 1,'BR-2A-1': 1,'BR-5A-1': 1}, "KS0437-FBA"),
+    ({'BR-25': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0049-FBA"),
+    ({'BR-26': 1,'BR-2B-1': 1,'BR-5B-1': 1}, "KS0052-FBA"),
+    ({'BR-30': 1,'BR-2C-1': 1,'BR-5C-1': 1}, "KS0103-FBA"),
+    ({'BR-28': 1,'BR-2D-1': 1,'BR-5D-1': 1}, "KS0088-FBA"),
+    ({'BR-27': 1,'BR-2D-1': 1,'BR-5D-1': 1}, "KS0087-FBA"),
+    ({'BR-2C-1': 1,'BR-29': 1,'BR-5C-1': 1}, "KS0104-FBA"),
+    ({'BR-2A-1': 1,'BR-31': 1,'BR-5A-1': 1}, "KS0102-FBA"),
+    ({'BR-2A-1': 1,'BR-32': 1,'BR-5A-1': 1}, "KS0101-FBA"),
+    ({'BR-2E-1': 1,'BR-35': 1,'BR-5E-1': 1}, "KS0513-FBA"),
+    ({'BR-2E-1': 1,'BR-36': 1,'BR-5E-1': 1}, "KS0520-FBA"),
+    ({'BR-2E-1': 1,'BR-37': 1,'BR-5E-1': 1}, "KS0527-FBA"),
+    ({'BR-2E-1': 1,'BR-38': 1,'BR-5E-1': 1}, "KS0534-FBA"),
+    ({'BR-2E-1': 1,'BR-39': 1,'BR-5E-1': 1}, "KS0541-FBA"),
+    ({'BR-2E-1': 1,'BR-40': 1,'BR-5E-1': 1}, "KS0548"),
+    ({'BR-2E-1': 1,'BR-33': 1,'BR-5E-1': 1}, "KS0555-FBA"),
+    ({'BR-2E-1': 1,'BR-34': 1,'BR-5E-1': 1}, "KS0562-FBA"),
+
+]
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+def find_exact_combination(counts):
+    """Return the matching SKU if counts exactly match a combination requirement."""
+    for req, result in COMBINATIONS:
+        if counts == req:
+            return result        
+    return None
+
+@app.route('/print', methods=['POST'])
+def print_sku():
+    data = request.json or {}
+    sku = data.get('sku', '').upper()
+    location = './labels/' + sku + '.pdf'
+    os.system('PDF2Printer ' + location)
+    return redirect(url_for('index'))
+
+@app.route('/check', methods=['POST'])
+def check():
+    data = request.json or {}
+    skus = data.get('skus', [])
+    counts = Counter(skus)
+    exact_match = find_exact_combination(dict(counts))
+    return jsonify({
+        "counts": dict(counts),
+        "exact_match": exact_match
+    })
+
+os.system("start \"\" http://127.0.0.1:9000")
+if __name__ == '__main__':
+    app.run(debug=True, port=9000)

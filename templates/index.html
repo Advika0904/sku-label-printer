@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SKU Real-time Combination Checker</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    #skuInput { padding: 10px; width: 300px; font-size: 16px; border: 2px solid #ccc; border-radius: 4px; }
+    #skuInput:focus { border-color: #007bff; outline: none; }
+    button { padding: 8px 12px; font-size: 14px; margin-left: 8px; cursor: pointer; }
+    .chip { display: inline-block; padding: 6px 10px; border-radius: 16px; background:#f0f0f0; margin:4px; border: 1px solid #ddd; }
+    #entered { margin-top: 12px; }
+    #combinations { margin-top: 18px; font-weight: bold; }
+    #counts { margin-top: 8px; }
+    .status-msg { font-size: 0.9em; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h2>SKU Real-time Combination Checker</h2>
+  <p>Scan a barcode or type a SKU. It will process <strong>automatically</strong>.</p>
+
+  <input id="skuInput" placeholder="Scan barcode..." autofocus autocomplete="off">
+  <button id="undoBtn">Undo</button>
+  <button id="clearBtn">Clear</button>
+
+  <div id="entered"><strong>Entered SKUs:</strong> <span id="chips"></span></div>
+  <div id="counts"><strong>Counts:</strong> <span id="countsList">none</span></div>
+  <div id="combinations"><strong>Combinations formed:</strong> <div id="comboList">none</div></div>
+  <button id="printBtn" disabled>Print</button>
+
+  <script>
+    const input = document.getElementById('skuInput');
+    const chips = document.getElementById('chips');
+    const countsList = document.getElementById('countsList');
+    const comboList = document.getElementById('comboList');
+    const undoBtn = document.getElementById('undoBtn');
+    const printBtn = document.getElementById('printBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let skus = [];
+    let res = "";
+    let scanTimer; // Timer for automatic processing
+
+    function renderChips() {
+      chips.innerHTML = '';
+      skus.forEach((s) => {
+        const span = document.createElement('span');
+        span.className = 'chip';
+        span.textContent = s;
+        chips.appendChild(span);
+      });
+    }
+
+    function printLabel(){
+      if(res !== ""){
+        fetch('/print', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sku: res})
+        }).then(() => {
+            console.log("Printed:", res);
+        });
+      }
+    }
+
+    function updateFromServer() {
+      fetch('/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({skus})
+      })
+      .then(r => r.json())
+      .then(data => {
+        const counts = data.counts;
+        if (Object.keys(counts).length === 0) {
+          countsList.textContent = 'none';
+        } else {
+          countsList.textContent = Object.entries(counts).map(([k,v]) => `${k}: ${v}`).join(', ');
+        }
+
+        if (data.exact_match) {
+          comboList.innerHTML = `<span style="color:green">✅ Exact match: ${data.exact_match}</span>`;
+          printBtn.disabled = false;
+          res = data.exact_match;
+        } else {
+          comboList.innerHTML = '<span style="color:#888">No exact match</span>';
+          printBtn.disabled = true;
+          res = "";
+        }
+      })
+      .catch(err => {
+        comboList.innerHTML = '<span style="color:red">Error checking combinations</span>';
+        console.error(err);
+      });
+    }
+
+    // New: Centralized function to process input
+    function processInput() {
+      const val = input.value.trim().toUpperCase();
+      if (val) {
+        skus.push(val);
+        input.value = ''; // Clear immediately for next scan
+        renderChips();
+        updateFromServer();
+      }
+    }
+
+    // CHANGE: Listen for 'input' to catch scanner data automatically
+    input.addEventListener('input', function() {
+      clearTimeout(scanTimer);
+      // Wait 200ms after the last character is received to process
+      // This is fast enough for a scanner but allows the full string to arrive
+      scanTimer = setTimeout(processInput, 200);
+    });
+
+    // Keep Enter key for manual overrides
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(scanTimer); // Stop the auto-timer
+        processInput();
+      }
+    });
+
+    undoBtn.addEventListener('click', function() {
+      if (skus.length) skus.pop();
+      renderChips();
+      updateFromServer();
+    });
+
+    clearBtn.addEventListener('click', function() {
+      skus = [];
+      renderChips();
+      updateFromServer();
+    });
+
+    // Spacebar to Print & Reset
+    document.addEventListener('keydown', function(event) {
+      if(event.key === ' '){
+        event.preventDefault();
+        printLabel();
+        skus = [];
+        renderChips();
+        updateFromServer();
+      }
+    });
+
+    printBtn.addEventListener('click', printLabel);
+
+    // Ensure input is always focused
+    function keepInputFocus() {
+      if(document.activeElement.id !== "skuInput"){
+        input.focus();
+      }
+    }
+    setInterval(keepInputFocus, 100);
+
+    // Initial load
+    renderChips();
+    updateFromServer();
+  </script>
+</body>
+</html>
+```

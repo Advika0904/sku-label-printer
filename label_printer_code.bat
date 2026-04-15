@@ -1,0 +1,1 @@
+start /MIN cmd /k "pythonw app.py" 
